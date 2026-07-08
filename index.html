@@ -266,6 +266,10 @@
     <div class="note">長くすると、ゆっくり考えながら話しても途中で送信されにくくなります（推奨 3〜4秒）。話し終えたらマイクをタップすればすぐ送信できます。</div>
     <label>音声の読み上げ速度（0.8〜1.4）</label>
     <input type="number" id="cfg-rate" min="0.8" max="1.4" step="0.1">
+    <label>Obsidian保存先フォルダ</label>
+    <div class="note" id="cfg-folder-status"></div>
+    <button type="button" class="cancel-btn" id="cfg-folder-btn" style="width:100%; padding:12px; border-radius:10px; border:none; cursor:pointer; margin-top:8px;">📁 保存先フォルダを選ぶ</button>
+    <div class="note">Obsidian vault内のフォルダ（例：<b>商談ログ</b>）を選ぶと、商談を終えるたびに要点が.mdで自動保存されます。Chrome / Edge のみ対応。</div>
     <div class="btn-row">
       <button class="cancel-btn" id="cfg-cancel">閉じる</button>
       <button class="save-btn" id="cfg-save">保存</button>
@@ -426,7 +430,172 @@ const state = {
   jaVoice: null,
   pendingText: "",     // 発話中に貯めている確定テキスト
   silenceTimer: null,  // 無音を検知して送信するタイマー
+  dirHandle: null,     // Obsidian保存先フォルダのハンドル
+  dirName: "",         // 保存先フォルダ名（表示用）
 };
+
+/* ================= Obsidian保存（File System Access API） ================= */
+// フォルダハンドルはIndexedDBに保存して次回起動時も覚えておく
+const idb = {
+  open() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open("shodan-dojo", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("kv");
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  },
+  async set(k, v) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").put(v, k);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  },
+  async get(k) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction("kv", "readonly");
+      const rq = tx.objectStore("kv").get(k);
+      rq.onsuccess = () => res(rq.result);
+      rq.onerror = () => rej(rq.error);
+    });
+  },
+};
+
+const pad2 = (n) => String(n).padStart(2, "0");
+
+async function pickObsidianFolder() {
+  if (!window.showDirectoryPicker) {
+    toast("このブラウザはフォルダ保存に未対応です。Chrome / Edge をお使いください。", 5000);
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+    state.dirHandle = handle;
+    state.dirName = handle.name;
+    await idb.set("obsidianDir", handle);
+    updateFolderStatus();
+    toast("保存先を設定しました：" + handle.name, 2500);
+    flushObsidianQueue();
+  } catch (e) {
+    if (e.name !== "AbortError") toast("フォルダ選択に失敗しました: " + e.message, 5000);
+  }
+}
+
+async function ensurePermission(handle) {
+  const opts = { mode: "readwrite" };
+  try {
+    if ((await handle.queryPermission(opts)) === "granted") return true;
+    if ((await handle.requestPermission(opts)) === "granted") return true;
+  } catch (_) { /* ユーザー操作なしのrequestPermissionは失敗しうる */ }
+  return false;
+}
+
+async function writeMarkdown(dir, name, content) {
+  const fh = await dir.getFileHandle(name, { create: true });
+  const w = await fh.createWritable();
+  await w.write(content);
+  await w.close();
+}
+
+// 書き込めなかった記録をlocalStorageに退避（データを失わない）
+function queueNote(name, content) {
+  const q = JSON.parse(localStorage.getItem("sd_queue") || "[]");
+  q.push({ name, content });
+  localStorage.setItem("sd_queue", JSON.stringify(q));
+}
+async function flushObsidianQueue() {
+  if (!state.dirHandle) return;
+  const q = JSON.parse(localStorage.getItem("sd_queue") || "[]");
+  if (!q.length) return;
+  if (!(await ensurePermission(state.dirHandle))) return;
+  const remaining = [];
+  for (const item of q) {
+    try { await writeMarkdown(state.dirHandle, item.name, item.content); }
+    catch (_) { remaining.push(item); }
+  }
+  localStorage.setItem("sd_queue", JSON.stringify(remaining));
+  if (!remaining.length) toast(`保留していた${q.length}件をObsidianに保存しました`, 3000);
+}
+
+function buildNoteFilename() {
+  const d = new Date();
+  const stamp = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}`;
+  const who = (state.persona?.name || "商談").replace(/[\\/:*?"<>|（）()\s]/g, "");
+  return `商談_${stamp}_${who}.md`;
+}
+
+function buildNoteMarkdown(fb) {
+  const d = new Date();
+  const stamp = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const p = state.persona;
+  const v = VERDICT_MAP[fb.verdict] || VERDICT_MAP.pending;
+  const cleanLabel = v.label.replace(/^[^\p{L}\p{N}]+/u, "").trim(); // 先頭の絵文字を除去
+  const s = fb.scores;
+  const stars = "★".repeat(p.diff);
+  return `---
+date: ${stamp}
+相手: ${p.name}
+業種: ${p.biz}
+難易度: ${stars}
+結果: ${cleanLabel}
+tags: [商談道場, 営業ロープレ]
+---
+
+# 商談ログ ${p.name}
+
+- **日時**: ${stamp}
+- **相手**: ${p.name}／${p.biz}（難易度 ${stars}）
+- **結果**: ${v.label}
+- **判定理由**: ${fb.verdict_reason}
+
+## スコア
+
+| 項目 | 点数 |
+|---|---|
+| 困りごと発見力 | ${s.hearing}/10 |
+| 解決提案・クロージング | ${s.proposal}/10 |
+| 信頼構築・話し方 | ${s.trust}/10 |
+| 反論処理 | ${s.objection}/10 |
+
+## 次の商談へのアドバイス
+
+${fb.advice}
+`;
+}
+
+async function saveToObsidian(fb) {
+  if (!state.dirHandle) return; // 保存先未設定なら何もしない
+  const name = buildNoteFilename();
+  const md = buildNoteMarkdown(fb);
+  try {
+    if (!(await ensurePermission(state.dirHandle))) {
+      queueNote(name, md);
+      toast("Obsidianへの保存許可が必要です。⚙設定→保存先を選び直してください（記録は一時保存済み）。", 6000);
+      return;
+    }
+    await writeMarkdown(state.dirHandle, name, md);
+    toast("Obsidianに保存しました：" + name, 2500);
+  } catch (e) {
+    queueNote(name, md);
+    toast("Obsidian保存に失敗（一時保存しました）: " + e.message, 6000);
+  }
+}
+
+function updateFolderStatus() {
+  const el = $("cfg-folder-status");
+  if (!el) return;
+  if (!window.showDirectoryPicker) {
+    el.innerHTML = `<span style="color:var(--sub)">このブラウザは未対応（Chrome / Edge をお使いください）</span>`;
+    return;
+  }
+  el.innerHTML = state.dirName
+    ? `<span style="color:var(--green)">✓ 保存先：${state.dirName}</span>（商談ごとに自動保存されます）`
+    : `<span style="color:var(--sub)">未設定 — フォルダを選ぶと商談を自動記録します</span>`;
+}
 
 const store = {
   get apiKey() { return localStorage.getItem("sd_apikey") || ""; },
@@ -818,6 +987,7 @@ ${transcript}
     const fb = JSON.parse(jsonText);
     renderResult(fb);
     show("screen-result");
+    saveToObsidian(fb); // 保存先が設定されていれば要点を自動記録
   } catch (e) {
     toast("分析エラー: " + e.message, 6000);
   } finally {
@@ -909,6 +1079,7 @@ function openSettings(hint) {
   $("cfg-product").value = store.product;
   $("cfg-rate").value = store.rate;
   $("cfg-silence").value = store.silence;
+  updateFolderStatus();
   $("settings-modal").classList.add("open");
   if (hint) toast(hint);
 }
@@ -950,6 +1121,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   $("settings-btn").addEventListener("click", () => openSettings());
+  $("cfg-folder-btn").addEventListener("click", pickObsidianFolder);
   $("cfg-cancel").addEventListener("click", () => $("settings-modal").classList.remove("open"));
   $("cfg-save").addEventListener("click", () => {
     const newKey = $("cfg-apikey").value.trim();
@@ -963,6 +1135,19 @@ document.addEventListener("DOMContentLoaded", () => {
     updateKeyStatus();
     toast("保存しました", 2000);
   });
+
+  // 保存済みのObsidianフォルダを復元（あれば保留分も書き込む）
+  (async () => {
+    try {
+      const h = await idb.get("obsidianDir");
+      if (h) {
+        state.dirHandle = h;
+        state.dirName = h.name;
+        updateFolderStatus();
+        flushObsidianQueue();
+      }
+    } catch (_) { /* 無視 */ }
+  })();
 
   // 初回起動でAPIキー未設定なら案内
   if (!store.apiKey) {
