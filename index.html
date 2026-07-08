@@ -201,6 +201,7 @@
       鍵は<b>相手の困りごとを見つけ出し、AIでどう解決するかを見せる</b>こと。<br>
       商談を終えると、困りごと発見・解決提案・信頼構築・反論処理の4観点でAIがフィードバックする。<br>
       🎙 マイクを使うので Chrome / Edge 推奨。
+      <div id="key-status" style="margin-top:8px; font-size:0.8rem;"></div>
     </div>
     <div class="persona-grid" id="persona-grid"></div>
     <div class="random-card" id="random-card">🎲 ランダムに経営者と会う（実戦モード）</div>
@@ -255,6 +256,7 @@
     <h2>⚙ 設定</h2>
     <label>Anthropic APIキー</label>
     <input type="password" id="cfg-apikey" placeholder="sk-ant-...">
+    <div class="note" id="cfg-key-status"></div>
     <div class="note">キーはこの端末（ブラウザ）にのみ保存されます。<a href="https://platform.claude.com/" target="_blank" style="color:var(--accent2)">platform.claude.com</a> で取得できます。</div>
     <label>商材メモ（AIが「おじさんの右腕」として理解する内容）</label>
     <textarea id="cfg-product"></textarea>
@@ -439,6 +441,13 @@ const store = {
 function show(screenId) {
   document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
   $(screenId).classList.add("active");
+}
+function updateKeyStatus() {
+  const el = $("key-status");
+  if (!el) return;
+  el.innerHTML = store.apiKey
+    ? `<span style="color:var(--green)">✓ APIキー設定済み</span>（この端末に保存済み。再入力は不要です）`
+    : `<span style="color:var(--red)">⚠ APIキー未設定</span> — 右上の⚙設定から入力してください`;
 }
 function toast(msg, ms = 4000) {
   const t = $("toast");
@@ -865,7 +874,15 @@ function renderResult(fb) {
 
 /* ================= 設定モーダル ================= */
 function openSettings(hint) {
-  $("cfg-apikey").value = store.apiKey;
+  const key = store.apiKey;
+  $("cfg-apikey").value = "";
+  if (key) {
+    $("cfg-apikey").placeholder = "変更する場合のみ入力";
+    $("cfg-key-status").innerHTML = `<span style="color:var(--green)">✓ 保存済み（末尾 …${key.slice(-4)}）</span> このまま空欄で保存すれば現在のキーを使い続けます。`;
+  } else {
+    $("cfg-apikey").placeholder = "sk-ant-...";
+    $("cfg-key-status").innerHTML = `<span style="color:var(--red)">未設定</span> APIキーを入力してください。`;
+  }
   $("cfg-product").value = store.product;
   $("cfg-rate").value = store.rate;
   $("settings-modal").classList.add("open");
@@ -875,6 +892,7 @@ function openSettings(hint) {
 /* ================= イベント ================= */
 document.addEventListener("DOMContentLoaded", () => {
   renderPersonaGrid();
+  updateKeyStatus();
   state.recognition = setupRecognition();
   state.jaVoice = pickJaVoice();
 
@@ -910,11 +928,13 @@ document.addEventListener("DOMContentLoaded", () => {
   $("settings-btn").addEventListener("click", () => openSettings());
   $("cfg-cancel").addEventListener("click", () => $("settings-modal").classList.remove("open"));
   $("cfg-save").addEventListener("click", () => {
-    store.apiKey = $("cfg-apikey").value.trim();
+    const newKey = $("cfg-apikey").value.trim();
+    if (newKey) store.apiKey = newKey; // 空欄なら既存キーを維持（誤って消さない）
     store.product = $("cfg-product").value.trim() || DEFAULT_PRODUCT;
     const r = parseFloat($("cfg-rate").value);
     if (!Number.isNaN(r)) store.rate = Math.max(0.8, Math.min(1.4, r));
     $("settings-modal").classList.remove("open");
+    updateKeyStatus();
     toast("保存しました", 2000);
   });
 
