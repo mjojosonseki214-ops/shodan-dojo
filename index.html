@@ -25,6 +25,7 @@
     min-height: 100vh;
   }
   .container { max-width: 720px; margin: 0 auto; padding: 16px; }
+  .container.wide { max-width: 1120px; }
   h1 { font-size: 1.3rem; letter-spacing: 0.05em; }
   h1 .sub { font-size: 0.75rem; color: var(--sub); font-weight: normal; display: block; margin-top: 2px; }
   header { display: flex; justify-content: space-between; align-items: center; padding: 8px 0 16px; }
@@ -148,6 +149,33 @@
   .result-btns { display: flex; gap: 10px; margin: 16px 0 40px; }
   .result-btns button { flex: 1; }
 
+  /* ===== result layout + coach chat ===== */
+  .result-layout { display: grid; grid-template-columns: 1fr; gap: 16px; align-items: start; }
+  @media (min-width: 900px) {
+    .result-layout { grid-template-columns: 1fr 360px; }
+    .result-coach { position: sticky; top: 16px; }
+  }
+  .result-coach {
+    background: var(--panel); border: 1px solid #333a4d; border-radius: var(--radius);
+    padding: 16px; display: flex; flex-direction: column;
+  }
+  .coach-head { font-size: 1rem; font-weight: bold; margin-bottom: 4px; }
+  .coach-note { font-size: 0.78rem; color: var(--sub); margin-bottom: 10px; line-height: 1.5; }
+  .coach-log {
+    background: var(--bg); border: 1px solid #333a4d; border-radius: 10px;
+    padding: 10px; height: 340px; overflow-y: auto; margin-bottom: 10px;
+  }
+  .coach-input-row { display: flex; gap: 8px; }
+  .coach-input-row input {
+    flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #333a4d;
+    background: var(--bg); color: var(--text); font-size: 0.95rem;
+  }
+  .coach-input-row button {
+    padding: 12px 18px; border: none; border-radius: 10px; background: var(--accent2);
+    color: #fff; cursor: pointer; font-weight: bold;
+  }
+  .coach-input-row button:disabled { opacity: 0.5; cursor: default; }
+
   /* ===== modal ===== */
   .modal-bg {
     display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 50;
@@ -235,17 +263,30 @@
 
   <!-- ===== RESULT ===== -->
   <div class="screen" id="screen-result">
-    <div class="verdict" id="r-verdict">
-      <div class="label" id="r-verdict-label"></div>
-      <div class="reason" id="r-verdict-reason"></div>
-    </div>
-    <div class="score-grid" id="r-scores"></div>
-    <div class="fb-section"><h3 class="good">✅ よかった点</h3><ul id="r-good"></ul></div>
-    <div class="fb-section"><h3 class="bad">🔧 改善ポイント</h3><ul id="r-improve"></ul></div>
-    <div class="fb-section"><h3 class="advice">🎯 次の商談へのアドバイス</h3><p id="r-advice"></p></div>
-    <div class="result-btns">
-      <button class="primary-btn blue" id="retry-btn">同じ相手にもう一度</button>
-      <button class="primary-btn" id="home-btn">ホームへ</button>
+    <div class="result-layout">
+      <div class="result-main">
+        <div class="verdict" id="r-verdict">
+          <div class="label" id="r-verdict-label"></div>
+          <div class="reason" id="r-verdict-reason"></div>
+        </div>
+        <div class="score-grid" id="r-scores"></div>
+        <div class="fb-section"><h3 class="good">✅ よかった点</h3><ul id="r-good"></ul></div>
+        <div class="fb-section"><h3 class="bad">🔧 改善ポイント</h3><ul id="r-improve"></ul></div>
+        <div class="fb-section"><h3 class="advice">🎯 次の商談へのアドバイス</h3><p id="r-advice"></p></div>
+        <div class="result-btns">
+          <button class="primary-btn blue" id="retry-btn">同じ相手にもう一度</button>
+          <button class="primary-btn" id="home-btn">ホームへ</button>
+        </div>
+      </div>
+      <aside class="result-coach">
+        <div class="coach-head">💬 コーチに質問</div>
+        <div class="coach-note">この商談で分からなかったこと、もっと良い言い方などを、クロードに聞けます。</div>
+        <div id="coach-log" class="coach-log"></div>
+        <div class="coach-input-row">
+          <input type="text" id="coach-input" placeholder="例：断られたとき何て返せばよかった？">
+          <button id="coach-send">送信</button>
+        </div>
+      </aside>
     </div>
   </div>
 </div>
@@ -432,6 +473,10 @@ const state = {
   silenceTimer: null,  // 無音を検知して送信するタイマー
   dirHandle: null,     // Obsidian保存先フォルダのハンドル
   dirName: "",         // 保存先フォルダ名（表示用）
+  lastTranscript: "",  // 直前の商談の会話ログ（コーチ用）
+  lastFeedback: null,  // 直前の商談のフィードバック（コーチ用）
+  coachMessages: [],   // コーチとのチャット履歴
+  coachBusy: false,
 };
 
 /* ================= Obsidian保存（File System Access API） ================= */
@@ -617,6 +662,8 @@ const store = {
 function show(screenId) {
   document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
   $(screenId).classList.add("active");
+  // 結果画面ではコーチ欄を右に置くため横幅を広げる
+  document.querySelector(".container").classList.toggle("wide", screenId === "screen-result");
 }
 function updateKeyStatus() {
   const el = $("key-status");
@@ -985,6 +1032,12 @@ ${transcript}
     let jsonText = "";
     for (const block of data.content) if (block.type === "text") jsonText += block.text;
     const fb = JSON.parse(jsonText);
+    // コーチ用に今回の商談内容を保存し、チャットを初期化
+    state.lastTranscript = transcript;
+    state.lastFeedback = fb;
+    state.coachMessages = [];
+    $("coach-log").innerHTML = "";
+    addCoachBubble("ai", "お疲れさまでした。今の商談で分からなかったこと、『あの場面どう返せばよかった？』など何でも聞いてください。");
     renderResult(fb);
     show("screen-result");
     saveToObsidian(fb); // 保存先が設定されていれば要点を自動記録
@@ -1065,6 +1118,76 @@ function renderResult(fb) {
   $("r-advice").textContent = fb.advice;
 }
 
+/* ================= コーチチャット（商談後の質問） ================= */
+function addCoachBubble(role, text) {
+  const log = $("coach-log");
+  const div = document.createElement("div");
+  div.className = `msg ${role}`;
+  const b = document.createElement("div");
+  b.className = "bubble";
+  b.textContent = text;
+  div.appendChild(b);
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  return b;
+}
+
+function coachSystemPrompt() {
+  const fb = state.lastFeedback;
+  const sc = (fb && fb.scores) || {};
+  const verdictLabel = fb ? (VERDICT_MAP[fb.verdict]?.label || fb.verdict) : "";
+  return `あなたは中小企業向け営業「おじさんの右腕」のトップ営業コーチです。
+たった今終わった営業ロールプレイについて、営業担当（ユーザー）からの質問に答えます。
+分からなかった点の解説、もっと良い言い方（具体的なトーク例）、次にどうすればよいかを、
+現場で使える言葉で簡潔に、しかし具体的に答えてください。専門用語は避け、実際のセリフ例は「」で示すこと。
+
+【商材：おじさんの右腕】
+${store.product}
+
+【今回の商談相手（AIが演じた経営者）】
+${state.persona ? state.persona.prompt : ""}
+
+【商談の記録】
+${state.lastTranscript}
+
+【AIが出したフィードバック要約】
+結果：${verdictLabel}
+スコア：困りごと発見${sc.hearing ?? "-"} / 提案${sc.proposal ?? "-"} / 信頼${sc.trust ?? "-"} / 反論${sc.objection ?? "-"}（各10点満点）
+アドバイス：${fb ? fb.advice : ""}
+
+この文脈を踏まえ、営業担当の質問にコーチとして答えてください。`;
+}
+
+async function coachAsk(text) {
+  if (!text || state.coachBusy) return;
+  if (!store.apiKey) { toast("APIキーが未設定です。⚙設定から入力してください。"); return; }
+  addCoachBubble("user", text);
+  state.coachMessages.push({ role: "user", content: text });
+  state.coachBusy = true;
+  $("coach-send").disabled = true;
+  const thinking = addCoachBubble("ai", "…");
+  try {
+    const data = await callClaude({
+      model: "claude-opus-4-8",
+      max_tokens: 1500,
+      system: [{ type: "text", text: coachSystemPrompt(), cache_control: { type: "ephemeral" } }],
+      messages: state.coachMessages,
+    });
+    let out = "";
+    for (const b of data.content) if (b.type === "text") out += b.text;
+    out = out.trim() || "……。";
+    state.coachMessages.push({ role: "assistant", content: out });
+    thinking.textContent = out;
+  } catch (e) {
+    thinking.textContent = "（通信エラー）";
+    toast(e.message);
+  } finally {
+    state.coachBusy = false;
+    $("coach-send").disabled = false;
+    $("coach-log").scrollTop = $("coach-log").scrollHeight;
+  }
+}
+
 /* ================= 設定モーダル ================= */
 function openSettings(hint) {
   const key = store.apiKey;
@@ -1118,6 +1241,17 @@ document.addEventListener("DOMContentLoaded", () => {
   $("home-btn").addEventListener("click", () => {
     speechSynthesis.cancel();
     show("screen-setup");
+  });
+
+  $("coach-send").addEventListener("click", () => {
+    const v = $("coach-input").value.trim();
+    if (v) { $("coach-input").value = ""; coachAsk(v); }
+  });
+  $("coach-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing) {
+      const v = $("coach-input").value.trim();
+      if (v) { $("coach-input").value = ""; coachAsk(v); }
+    }
   });
 
   $("settings-btn").addEventListener("click", () => openSettings());
