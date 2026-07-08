@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>商談道場 — おじさんの右腕 営業シミュレーター</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #1a1d27;
+    --panel2: #232736;
+    --text: #e8eaf0;
+    --sub: #9aa0b4;
+    --accent: #e8a33d;
+    --accent2: #4e8cff;
+    --green: #3ecf8e;
+    --red: #f06060;
+    --radius: 14px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .container { max-width: 720px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.3rem; letter-spacing: 0.05em; }
+  h1 .sub { font-size: 0.75rem; color: var(--sub); font-weight: normal; display: block; margin-top: 2px; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 8px 0 16px; }
+  .icon-btn {
+    background: var(--panel); border: 1px solid #333a4d; color: var(--sub);
+    border-radius: 10px; padding: 8px 12px; cursor: pointer; font-size: 0.85rem;
+  }
+  .icon-btn:hover { color: var(--text); }
+
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  /* ===== setup ===== */
+  .intro {
+    background: linear-gradient(135deg, #232736, #1a1d27);
+    border: 1px solid #333a4d; border-radius: var(--radius);
+    padding: 16px; margin-bottom: 16px; font-size: 0.9rem; line-height: 1.7; color: var(--sub);
+  }
+  .intro b { color: var(--accent); }
+  .persona-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
+  @media (min-width: 560px) { .persona-grid { grid-template-columns: repeat(4, 1fr); } }
+  .persona-card {
+    background: var(--panel); border: 2px solid #333a4d; border-radius: var(--radius);
+    padding: 12px 10px; cursor: pointer; text-align: center; transition: border-color .15s, transform .1s;
+  }
+  .persona-card:hover { transform: translateY(-2px); }
+  .persona-card.selected { border-color: var(--accent); background: #262230; }
+  .persona-card .emoji { font-size: 1.8rem; }
+  .persona-card .name { font-weight: bold; font-size: 0.9rem; margin-top: 6px; }
+  .persona-card .biz { font-size: 0.72rem; color: var(--sub); margin-top: 2px; }
+  .persona-card .diff { font-size: 0.7rem; margin-top: 6px; }
+  .diff-1 { color: var(--green); } .diff-2 { color: var(--accent); } .diff-3 { color: var(--red); }
+  .random-card {
+    background: var(--panel); border: 2px dashed #4a5168; border-radius: var(--radius);
+    padding: 14px; cursor: pointer; text-align: center; margin-bottom: 16px;
+    color: var(--sub); font-size: 0.9rem;
+  }
+  .random-card.selected { border-color: var(--accent); color: var(--accent); background: #262230; }
+  .primary-btn {
+    width: 100%; padding: 16px; border: none; border-radius: var(--radius);
+    background: var(--accent); color: #1a1400; font-size: 1.05rem; font-weight: bold;
+    cursor: pointer; letter-spacing: 0.05em;
+  }
+  .primary-btn:disabled { opacity: 0.4; cursor: default; }
+  .primary-btn.blue { background: var(--accent2); color: #fff; }
+
+  /* ===== session ===== */
+  .partner-bar {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--panel); border: 1px solid #333a4d; border-radius: var(--radius);
+    padding: 10px 14px; margin-bottom: 12px;
+  }
+  .partner-bar .emoji { font-size: 2rem; }
+  .partner-bar .info { flex: 1; }
+  .partner-bar .name { font-weight: bold; }
+  .partner-bar .biz { font-size: 0.75rem; color: var(--sub); }
+  .end-btn {
+    background: var(--red); color: #fff; border: none; border-radius: 10px;
+    padding: 10px 14px; cursor: pointer; font-size: 0.85rem; font-weight: bold; white-space: nowrap;
+  }
+  #chat-log {
+    background: var(--panel); border: 1px solid #333a4d; border-radius: var(--radius);
+    padding: 14px; height: 46vh; overflow-y: auto; margin-bottom: 12px;
+  }
+  .msg { margin-bottom: 12px; display: flex; }
+  .msg .bubble {
+    max-width: 82%; padding: 10px 14px; border-radius: 14px; font-size: 0.92rem; line-height: 1.6;
+    white-space: pre-wrap;
+  }
+  .msg.user { justify-content: flex-end; }
+  .msg.user .bubble { background: var(--accent2); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.ai .bubble { background: var(--panel2); border-bottom-left-radius: 4px; }
+  .msg.system .bubble { background: none; color: var(--sub); font-size: 0.78rem; margin: 0 auto; }
+  .thinking-dots { color: var(--sub); font-size: 0.85rem; }
+
+  .voice-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+  #mic-btn {
+    flex: 1; padding: 18px; border: none; border-radius: var(--radius);
+    background: var(--panel2); color: var(--text); font-size: 1rem; font-weight: bold; cursor: pointer;
+    border: 2px solid #333a4d; transition: all .15s;
+  }
+  #mic-btn.listening { background: #2d1b1b; border-color: var(--red); color: var(--red); animation: pulse 1.2s infinite; }
+  #mic-btn.speaking { background: #1b2d22; border-color: var(--green); color: var(--green); }
+  #mic-btn:disabled { opacity: 0.5; cursor: default; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(240,96,96,.4); } 50% { box-shadow: 0 0 0 10px rgba(240,96,96,0); } }
+  #interim { min-height: 1.2em; font-size: 0.82rem; color: var(--sub); margin-bottom: 8px; padding: 0 4px; }
+  .text-row { display: flex; gap: 8px; }
+  .text-row input {
+    flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #333a4d;
+    background: var(--panel); color: var(--text); font-size: 0.95rem;
+  }
+  .text-row button {
+    padding: 12px 18px; border: none; border-radius: 10px; background: var(--panel2);
+    color: var(--text); cursor: pointer;
+  }
+  .auto-mic-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 0.8rem; color: var(--sub); }
+
+  /* ===== result ===== */
+  .verdict {
+    text-align: center; padding: 24px 16px; border-radius: var(--radius); margin-bottom: 16px;
+    border: 1px solid #333a4d;
+  }
+  .verdict.win { background: linear-gradient(135deg, #14301f, #1a1d27); border-color: var(--green); }
+  .verdict.pending { background: linear-gradient(135deg, #30290f, #1a1d27); border-color: var(--accent); }
+  .verdict.lose { background: linear-gradient(135deg, #301414, #1a1d27); border-color: var(--red); }
+  .verdict .label { font-size: 1.6rem; font-weight: bold; }
+  .verdict .reason { font-size: 0.85rem; color: var(--sub); margin-top: 8px; line-height: 1.6; }
+  .score-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+  .score-card { background: var(--panel); border: 1px solid #333a4d; border-radius: var(--radius); padding: 14px; }
+  .score-card .title { font-size: 0.78rem; color: var(--sub); }
+  .score-card .val { font-size: 1.7rem; font-weight: bold; margin: 4px 0; }
+  .score-card .bar { height: 6px; background: #333a4d; border-radius: 3px; overflow: hidden; }
+  .score-card .bar > div { height: 100%; background: var(--accent); border-radius: 3px; }
+  .fb-section { background: var(--panel); border: 1px solid #333a4d; border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+  .fb-section h3 { font-size: 0.95rem; margin-bottom: 10px; }
+  .fb-section h3.good { color: var(--green); } .fb-section h3.bad { color: var(--red); } .fb-section h3.advice { color: var(--accent2); }
+  .fb-section ul { padding-left: 1.2em; font-size: 0.88rem; line-height: 1.7; color: #cfd3e0; }
+  .fb-section li { margin-bottom: 8px; }
+  .fb-section .quote { display: block; font-size: 0.8rem; color: var(--sub); border-left: 3px solid #333a4d; padding-left: 8px; margin-top: 4px; }
+  .fb-section p { font-size: 0.88rem; line-height: 1.8; color: #cfd3e0; }
+  .result-btns { display: flex; gap: 10px; margin: 16px 0 40px; }
+  .result-btns button { flex: 1; }
+
+  /* ===== modal ===== */
+  .modal-bg {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 50;
+    align-items: center; justify-content: center; padding: 16px;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid #333a4d; border-radius: var(--radius);
+    padding: 20px; width: 100%; max-width: 480px; max-height: 85vh; overflow-y: auto;
+  }
+  .modal h2 { font-size: 1.05rem; margin-bottom: 12px; }
+  .modal label { font-size: 0.8rem; color: var(--sub); display: block; margin: 12px 0 6px; }
+  .modal input, .modal textarea {
+    width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #333a4d;
+    background: var(--bg); color: var(--text); font-size: 0.9rem; font-family: inherit;
+  }
+  .modal textarea { min-height: 140px; line-height: 1.6; }
+  .modal .note { font-size: 0.75rem; color: var(--sub); margin-top: 6px; line-height: 1.6; }
+  .modal .btn-row { display: flex; gap: 10px; margin-top: 16px; }
+  .modal .btn-row button { flex: 1; padding: 12px; border-radius: 10px; border: none; cursor: pointer; }
+  .save-btn { background: var(--accent); color: #1a1400; font-weight: bold; }
+  .cancel-btn { background: var(--panel2); color: var(--sub); }
+
+  .loading-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(15,17,23,0.85); z-index: 60;
+    flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+  }
+  .loading-overlay.open { display: flex; }
+  .spinner { width: 44px; height: 44px; border: 4px solid #333a4d; border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-overlay .txt { color: var(--sub); font-size: 0.9rem; }
+
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--red); color: #fff; padding: 10px 18px; border-radius: 10px;
+    font-size: 0.85rem; z-index: 70; display: none; max-width: 90%;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>商談道場<span class="sub">おじさんの右腕 営業ロープレ</span></h1>
+    <button class="icon-btn" id="settings-btn">⚙ 設定</button>
+  </header>
+
+  <!-- ===== SETUP ===== -->
+  <div class="screen active" id="screen-setup">
+    <div class="intro">
+      いろんな業種の<b>経営者と音声で商談</b>して、<b>「おじさんの右腕」の契約</b>を目指せ。<br>
+      商談を終えると、ヒアリング力・提案・信頼構築・反論処理の4観点でAIがフィードバックする。<br>
+      🎙 マイクを使うので Chrome / Edge 推奨。
+    </div>
+    <div class="persona-grid" id="persona-grid"></div>
+    <div class="random-card" id="random-card">🎲 ランダムに経営者と会う（実戦モード）</div>
+    <button class="primary-btn" id="start-btn" disabled>商談をはじめる</button>
+  </div>
+
+  <!-- ===== SESSION ===== -->
+  <div class="screen" id="screen-session">
+    <div class="partner-bar">
+      <div class="emoji" id="s-emoji"></div>
+      <div class="info">
+        <div class="name" id="s-name"></div>
+        <div class="biz" id="s-biz"></div>
+      </div>
+      <button class="end-btn" id="end-btn">商談終了</button>
+    </div>
+    <div id="chat-log"></div>
+    <div id="interim"></div>
+    <div class="voice-row">
+      <button id="mic-btn">🎙 タップして話す</button>
+    </div>
+    <div class="text-row">
+      <input type="text" id="text-input" placeholder="キーボードで入力もできます">
+      <button id="text-send">送信</button>
+    </div>
+    <div class="auto-mic-row">
+      <input type="checkbox" id="auto-mic" checked>
+      <label for="auto-mic">相手の話が終わったら自動でマイクON（ハンズフリー）</label>
+    </div>
+  </div>
+
+  <!-- ===== RESULT ===== -->
+  <div class="screen" id="screen-result">
+    <div class="verdict" id="r-verdict">
+      <div class="label" id="r-verdict-label"></div>
+      <div class="reason" id="r-verdict-reason"></div>
+    </div>
+    <div class="score-grid" id="r-scores"></div>
+    <div class="fb-section"><h3 class="good">✅ よかった点</h3><ul id="r-good"></ul></div>
+    <div class="fb-section"><h3 class="bad">🔧 改善ポイント</h3><ul id="r-improve"></ul></div>
+    <div class="fb-section"><h3 class="advice">🎯 次の商談へのアドバイス</h3><p id="r-advice"></p></div>
+    <div class="result-btns">
+      <button class="primary-btn blue" id="retry-btn">同じ相手にもう一度</button>
+      <button class="primary-btn" id="home-btn">ホームへ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SETTINGS MODAL ===== -->
+<div class="modal-bg" id="settings-modal">
+  <div class="modal">
+    <h2>⚙ 設定</h2>
+    <label>Anthropic APIキー</label>
+    <input type="password" id="cfg-apikey" placeholder="sk-ant-...">
+    <div class="note">キーはこの端末（ブラウザ）にのみ保存されます。<a href="https://platform.claude.com/" target="_blank" style="color:var(--accent2)">platform.claude.com</a> で取得できます。</div>
+    <label>商材メモ（AIが「おじさんの右腕」として理解する内容）</label>
+    <textarea id="cfg-product"></textarea>
+    <div class="note">料金やサービス内容を実際に合わせて書き換えると、経営者役の反応がリアルになります。</div>
+    <label>音声の読み上げ速度（0.8〜1.4）</label>
+    <input type="number" id="cfg-rate" min="0.8" max="1.4" step="0.1">
+    <div class="btn-row">
+      <button class="cancel-btn" id="cfg-cancel">閉じる</button>
+      <button class="save-btn" id="cfg-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+  <div class="txt" id="loading-txt">分析中...</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+/* ================= 商材デフォルト ================= */
+const DEFAULT_PRODUCT = `サービス名：おじさんの右腕
+対象：中小企業の経営者（40〜60代中心）
+内容：AI活用の伴走型コンサルティング。経営者の隣で「右腕」として、
+・見積書・請求書・日報などの事務作業のAI化
+・チラシ・SNS・ホームページなど集客物の作成支援
+・業務の棚卸しとAIツール導入の伴走サポート
+を行う。難しい操作は不要で、経営者が話すだけで形になるところまで面倒を見る。
+料金：月額制（初回相談は無料）。
+強み：ITが苦手な経営者でも使えるように、ツールを売るのではなく「使えるようになるまで」隣で伴走すること。`;
+
+/* ================= ペルソナ ================= */
+const PERSONAS = [
+  {
+    id: "tamura", emoji: "🏭", name: "田村 剛三（58）", biz: "金属加工業・従業員12名", diff: 3,
+    voice: { gender: "male", pitch: 0.7, rate: 0.95 },
+    prompt: `名前：田村剛三（たむら ごうぞう）58歳。町工場（金属加工業、従業員12名）の2代目社長。
+性格：頑固で無骨。口数少なめ。職人気質でよそ者に心を開くのに時間がかかる。ただし筋の通った話と現場を分かってる相手には少しずつ心を開く。
+ITへの態度：強い不信感。「AIなんか信用ならん」「パソコンは事務の子に任せとる」。過去に営業マンに高い業務ソフトを売りつけられて使いこなせず捨てた苦い経験がある（このことは信頼した相手にしか話さない）。
+隠れた課題（自分からは言わない。良い質問をされたら少しずつ出す）：
+・見積書の作成に毎晩2時間かかっていて帰りが遅い
+・職人の高齢化。技術の継承が文書化できていない
+・息子が継ぐか迷っており、会社を「継ぎたくなる会社」にしたい
+反論パターン：「高い」「うちには要らん」「前にソフト屋に騙された」「わしはパソコン打てんぞ」`,
+  },
+  {
+    id: "sato", emoji: "🏮", name: "佐藤 恵美子（52）", biz: "居酒屋2店舗経営", diff: 1,
+    voice: { gender: "female", pitch: 1.2, rate: 1.1 },
+    prompt: `名前：佐藤恵美子（さとう えみこ）52歳。駅前で居酒屋を2店舗経営。女将兼社長。
+性格：明るくて話し好き。人懐っこいが、話が脱線しやすい（店の常連の話、娘の話などをよくする）。ノリは良いがその場のノリだけで契約はせず、「で、結局いくらなの？」と現実的な質問をする。
+ITへの態度：スマホは使いこなす。インスタも一応やってるが投稿が続かない。
+隠れた課題（自分からは言わない。聞かれたら出す）：
+・シフト作成が毎月ストレス。バイトのドタキャン対応も大変
+・2号店の店長に任せたいが数字の管理ができていない
+・インスタの投稿を続けたいがネタ切れ＆時間がない
+反論パターン：「月いくら？うち飲食は利益薄いのよ」「私機械オンチだから続くかしら」`,
+  },
+  {
+    id: "yamaguchi", emoji: "🏗️", name: "山口 昌平（61）", biz: "建設業・従業員25名", diff: 3,
+    voice: { gender: "male", pitch: 0.75, rate: 0.9 },
+    prompt: `名前：山口昌平（やまぐち しょうへい）61歳。地場の建設会社社長。従業員25名。
+性格：無口で様子見型。「はあ」「まあ」「そうやなあ」など気のない返事が多い。即決は絶対にしない。「考えとくわ」が口癖。ただし本気で刺さる提案には目の色が変わり、具体的な質問をしてくる。
+ITへの態度：関心は薄いが、同業の組合で「AIで書類が楽になった」という話を小耳に挟んでおり、内心少しだけ気になっている（このことは自分からは絶対言わない）。
+隠れた課題：
+・安全書類・施工計画書などの書類作成が膨大で、現場監督が疲弊している
+・現場写真の整理が追いつかない
+・若手が採用できない。求人票が10年前のまま
+反論パターン：「考えとくわ」「担当の者に聞いてみんとな」「今は忙しい時期やから」`,
+  },
+  {
+    id: "nakanishi", emoji: "🏥", name: "中西 香織（55）", biz: "介護施設運営", diff: 2,
+    voice: { gender: "female", pitch: 1.1, rate: 0.95 },
+    prompt: `名前：中西香織（なかにし かおり）55歳。デイサービスと訪問介護の事業所を運営。
+性格：丁寧で礼儀正しいが、非常に慎重。リスクの話（個人情報、職員の反発、行政の監査）を必ず確認してくる。数字より「職員と利用者さんにとってどうか」を重視する。
+ITへの態度：必要性は感じているが、「介護現場にAIはまだ早いのでは」という先入観がある。
+隠れた課題：
+・介護記録の記入が職員の残業の最大原因になっている
+・人材採用が最大の悩み。求人を出しても応募が来ない
+・シフト調整で毎月管理者が疲弊している
+反論パターン：「個人情報は大丈夫なんですか」「うちの職員は年配が多くて使えるかしら」「監査で問題になりませんか」`,
+  },
+  {
+    id: "okubo", emoji: "🛒", name: "大久保 誠（49）", biz: "食品スーパー2店舗", diff: 2,
+    voice: { gender: "male", pitch: 0.95, rate: 1.15 },
+    prompt: `名前：大久保誠（おおくぼ まこと）49歳。地域密着の食品スーパーを2店舗経営。
+性格：せっかち。結論から話さないとイライラする。「で、それやると粗利いくら増えるの？」と費用対効果を数字で詰めてくる。逆に数字で納得すれば決断は早い。
+ITへの態度：レジやPOSは導入済み。道具として使えるものは使う主義。
+隠れた課題：
+・毎週のチラシ制作を外注していて月15万かかっている
+・POPを手書きしていて店長の時間を食っている
+・発注が店長の勘頼みで、廃棄ロスが多い月がある
+反論パターン：「それ、いくらでいくら儲かるの？」「今の外注と何が違うの？」「時間ないから3分でまとめて」`,
+  },
+  {
+    id: "inoue", emoji: "💇", name: "井上 蓮（45）", biz: "美容室3店舗経営", diff: 1,
+    voice: { gender: "male", pitch: 1.05, rate: 1.15 },
+    prompt: `名前：井上蓮（いのうえ れん）45歳。美容室を3店舗経営。元カリスマ美容師。
+性格：新しいもの好きでノリが軽い。「え、それ面白いじゃん」とすぐ食いつくが、飽き性で過去にもツール導入→3ヶ月で放置を繰り返している（サブスクの解約忘れも多い）。本人もそれを自覚していて、「続けられるか」が本当の関心事。
+ITへの態度：抵抗なし。ChatGPTも触ったことがあるが使いこなせてはいない。
+隠れた課題：
+・ホットペッパーの依存度が高く、手数料が重い
+・スタッフのSNS投稿の質がバラバラでブランドイメージが崩れている
+・スタッフ教育のマニュアルがなく、店舗ごとにサービスの質が違う
+反論パターン：「前もそういうの入れたけど誰も使わなくなったんだよね」「俺が飽きたら終わりじゃん？」`,
+  },
+  {
+    id: "matsumoto", emoji: "🚚", name: "松本 隆（57）", biz: "運送業・車両18台", diff: 3,
+    voice: { gender: "male", pitch: 0.8, rate: 1.0 },
+    prompt: `名前：松本隆（まつもと たかし）57歳。地場の運送会社社長。トラック18台。
+性格：数字に細かく、疑り深い。「それは御社の売りたい話でしょ」と営業トークを見抜こうとする。曖昧な回答をすると一気に信用を失う。「分からないことは分からない」と正直に言う営業は逆に評価する。
+ITへの態度：デジタコ・配車システムの営業を何度も受けており、営業慣れしている。半端な知識で運送業界を語られると不機嫌になる。
+隠れた課題：
+・2024年問題以降、ドライバーの労働時間管理が重くのしかかっている
+・請求書と運転日報の突合を事務員2人が手作業でやっている
+・燃料費高騰で利益が薄く、値上げ交渉の資料作りに困っている
+反論パターン：「他社の導入実績は？」「それ、うちの規模でも元取れるの？」「業界のこと分かってる？」`,
+  },
+  {
+    id: "fujii", emoji: "🏠", name: "藤井 徹（50）", biz: "不動産仲介・賃貸管理", diff: 2,
+    voice: { gender: "male", pitch: 0.9, rate: 1.1 },
+    prompt: `名前：藤井徹（ふじい とおる）50歳。駅前の不動産会社社長。仲介と賃貸管理400戸。
+性格：根っからの商売人。愛想は良いが腹の内を見せない。商談中に逆にこちらへ営業してくる（「ところでお宅、事務所の物件探してない？」）。駆け引き好きで、値引きを引き出そうとする。
+ITへの態度：ポータルサイトは使い倒している。効率化への関心は高いが「無料でどこまでできるか」をまず探る。
+隠れた課題：
+・物件紹介文を営業マンが片手間に書いていて、質が低く反響が弱い
+・内見後の追客メールが属人化していて、放置客が多い
+・管理物件のオーナーへの月次報告書作成が負担
+反論パターン：「それ無料のChatGPTでできるんじゃないの？」「もうちょっと勉強してよ（値引き要求）」`,
+  },
+];
+
+/* ================= 状態 ================= */
+const $ = (id) => document.getElementById(id);
+const state = {
+  persona: null,       // 選択中ペルソナ
+  isRandom: false,
+  messages: [],        // Claude API 形式 [{role, content}]
+  busy: false,
+  listening: false,
+  recognition: null,
+  jaVoice: null,
+};
+
+const store = {
+  get apiKey() { return localStorage.getItem("sd_apikey") || ""; },
+  set apiKey(v) { localStorage.setItem("sd_apikey", v); },
+  get product() { return localStorage.getItem("sd_product") || DEFAULT_PRODUCT; },
+  set product(v) { localStorage.setItem("sd_product", v); },
+  get rate() { return parseFloat(localStorage.getItem("sd_rate") || "1.05"); },
+  set rate(v) { localStorage.setItem("sd_rate", String(v)); },
+};
+
+/* ================= 画面切替 ================= */
+function show(screenId) {
+  document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
+  $(screenId).classList.add("active");
+}
+function toast(msg, ms = 4000) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => (t.style.display = "none"), ms);
+}
+
+/* ================= セットアップ画面 ================= */
+function renderPersonaGrid() {
+  const grid = $("persona-grid");
+  grid.innerHTML = "";
+  PERSONAS.forEach((p) => {
+    const card = document.createElement("div");
+    card.className = "persona-card";
+    card.dataset.id = p.id;
+    const diffStars = "★".repeat(p.diff) + "☆".repeat(3 - p.diff);
+    card.innerHTML = `<div class="emoji">${p.emoji}</div><div class="name">${p.name}</div><div class="biz">${p.biz}</div><div class="diff diff-${p.diff}">難易度 ${diffStars}</div>`;
+    card.addEventListener("click", () => {
+      document.querySelectorAll(".persona-card, .random-card").forEach((c) => c.classList.remove("selected"));
+      card.classList.add("selected");
+      state.persona = p;
+      state.isRandom = false;
+      $("start-btn").disabled = false;
+    });
+    grid.appendChild(card);
+  });
+  $("random-card").addEventListener("click", () => {
+    document.querySelectorAll(".persona-card, .random-card").forEach((c) => c.classList.remove("selected"));
+    $("random-card").classList.add("selected");
+    state.persona = null;
+    state.isRandom = true;
+    $("start-btn").disabled = false;
+  });
+}
+
+/* ================= 音声認識 ================= */
+function setupRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  const rec = new SR();
+  rec.lang = "ja-JP";
+  rec.continuous = false;
+  rec.interimResults = true;
+  rec.onresult = (e) => {
+    let interim = "", final = "";
+    for (const r of e.results) {
+      if (r.isFinal) final += r[0].transcript;
+      else interim += r[0].transcript;
+    }
+    $("interim").textContent = interim ? `…${interim}` : "";
+    if (final) {
+      $("interim").textContent = "";
+      sendUserMessage(final.trim());
+    }
+  };
+  rec.onend = () => {
+    state.listening = false;
+    updateMicBtn();
+  };
+  rec.onerror = (e) => {
+    state.listening = false;
+    updateMicBtn();
+    if (e.error === "not-allowed") toast("マイクの使用が許可されていません。ブラウザの設定を確認してください。");
+  };
+  return rec;
+}
+
+function startListening() {
+  if (!state.recognition || state.busy || state.listening) return;
+  if (speechSynthesis.speaking) return;
+  try {
+    state.recognition.start();
+    state.listening = true;
+    updateMicBtn();
+  } catch (_) { /* already started */ }
+}
+function stopListening() {
+  if (state.recognition && state.listening) state.recognition.stop();
+}
+function updateMicBtn() {
+  const btn = $("mic-btn");
+  btn.classList.remove("listening", "speaking");
+  if (speechSynthesis.speaking) {
+    btn.classList.add("speaking");
+    btn.textContent = "🔊 相手が話しています…";
+    btn.disabled = true;
+  } else if (state.busy) {
+    btn.textContent = "⏳ 相手が考えています…";
+    btn.disabled = true;
+  } else if (state.listening) {
+    btn.classList.add("listening");
+    btn.textContent = "🎙 聞き取り中…（タップで停止）";
+    btn.disabled = false;
+  } else {
+    btn.textContent = "🎙 タップして話す";
+    btn.disabled = false;
+  }
+}
+
+/* ================= 音声合成 ================= */
+function pickJaVoice(gender) {
+  const voices = speechSynthesis.getVoices().filter((v) => v.lang.startsWith("ja"));
+  if (!voices.length) return null;
+  const male = /Ichiro|Keita|男/i;
+  const female = /Nanami|Ayumi|Sayaka|Haruka|女/i;
+  const natural = /Online|Natural/i;
+  const pool = voices.filter((v) => (gender === "male" ? male.test(v.name) : female.test(v.name)));
+  const pick = pool.find((v) => natural.test(v.name)) || pool[0];
+  return pick || voices.find((v) => natural.test(v.name)) || voices[0];
+}
+speechSynthesis.onvoiceschanged = () => { state.jaVoice = pickJaVoice(state.persona?.voice?.gender); };
+
+function speak(text, done) {
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "ja-JP";
+  state.jaVoice = pickJaVoice(state.persona?.voice?.gender);
+  if (state.jaVoice) u.voice = state.jaVoice;
+  const pv = state.persona?.voice || {};
+  u.pitch = pv.pitch ?? 1.0;
+  u.rate = (pv.rate ?? 1.0) * store.rate;
+  u.onend = () => { updateMicBtn(); if (done) done(); };
+  u.onerror = () => { updateMicBtn(); if (done) done(); };
+  speechSynthesis.speak(u);
+  updateMicBtn();
+}
+
+/* ================= チャットUI ================= */
+function addBubble(role, text) {
+  const log = $("chat-log");
+  const div = document.createElement("div");
+  div.className = `msg ${role}`;
+  const b = document.createElement("div");
+  b.className = "bubble";
+  b.textContent = text;
+  div.appendChild(b);
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  return b;
+}
+
+/* ================= Claude API ================= */
+async function callClaude(body) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": store.apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = err?.error?.message || `APIエラー (${res.status})`;
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+function personaSystemPrompt(p) {
+  return `あなたは営業ロールプレイングの相手役です。以下の経営者になりきって、初回の対面商談に応じてください。
+
+【あなたが演じる経営者】
+${p.prompt}
+
+【商談相手（ユーザー）が売り込みに来ているサービス】
+${store.product}
+
+【演技のルール】
+- 完全にこの経営者本人として振る舞う。AIであることは絶対に明かさない。ロールプレイ外の話には応じない。
+- 発言は音声で読み上げられる。話し言葉のみで、1〜3文程度の短い返答にする。箇条書き・記号・絵文字・ト書きは使わない。
+- 営業に対して最初は警戒的・懐疑的に接する。簡単には心を開かない。
+- 「隠れた課題」は自分から話さない。相手が良い質問（現状を聞く、困りごとを深掘りする、共感する）をしたときだけ、少しずつ打ち明ける。
+- 相手の説明が抽象的・一方的・専門用語だらけなら、興味を失った態度を見せる。
+- 反論パターンを商談の流れに応じて自然にぶつける。
+- 相手が課題を正しく捉え、費用への不安にも誠実に答え、信頼に足ると感じたときだけ、契約や「次回、詳しい話を聞かせて」に前向きになってよい。基準は難易度に応じて厳しく保つこと。
+- 相手が失礼な態度を取ったり、強引すぎる場合は、商談を打ち切ってよい（「今日はもうええわ」など）。
+- 現実の中小企業経営者らしい生活感のある発言をする（業界の実情、金額感、人間関係など）。
+
+最初のあなたの発言から商談が始まります。あなたのオフィス（または店・事務所）に営業担当が訪ねてきた場面です。挨拶されたら軽く応じつつ、「で、今日はどんな用件？」という雰囲気で始めてください。`;
+}
+
+async function personaReply() {
+  state.busy = true;
+  updateMicBtn();
+  const thinkingBubble = addBubble("ai", "…");
+  try {
+    const data = await callClaude({
+      model: "claude-opus-4-8",
+      max_tokens: 1000,
+      system: [{ type: "text", text: personaSystemPrompt(state.persona), cache_control: { type: "ephemeral" } }],
+      messages: state.messages,
+    });
+    let text = "";
+    for (const block of data.content) if (block.type === "text") text += block.text;
+    text = text.trim() || "……。";
+    state.messages.push({ role: "assistant", content: text });
+    thinkingBubble.textContent = text;
+    $("chat-log").scrollTop = $("chat-log").scrollHeight;
+    state.busy = false;
+    speak(text, () => {
+      if ($("auto-mic").checked) startListening();
+    });
+  } catch (e) {
+    thinkingBubble.textContent = "（通信エラー）";
+    state.busy = false;
+    updateMicBtn();
+    toast(e.message);
+  }
+}
+
+function sendUserMessage(text) {
+  if (!text || state.busy) return;
+  stopListening();
+  speechSynthesis.cancel();
+  addBubble("user", text);
+  state.messages.push({ role: "user", content: text });
+  personaReply();
+}
+
+/* ================= 商談開始・終了 ================= */
+function startSession() {
+  if (!store.apiKey) {
+    openSettings("APIキーを設定すると商談をはじめられます。");
+    return;
+  }
+  if (state.isRandom) {
+    state.persona = PERSONAS[Math.floor(Math.random() * PERSONAS.length)];
+  }
+  const p = state.persona;
+  state.messages = [];
+  $("chat-log").innerHTML = "";
+  $("s-emoji").textContent = p.emoji;
+  $("s-name").textContent = p.name;
+  $("s-biz").textContent = p.biz + "　難易度" + "★".repeat(p.diff);
+  addBubble("system", "商談スタート。まずは挨拶から。マイクをタップして話しかけよう。");
+  show("screen-session");
+  // 経営者側の第一声を生成
+  state.messages.push({ role: "user", content: "（営業担当が事務所に入ってきて、あなたと目が合った）" });
+  personaReply();
+}
+
+const FEEDBACK_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["verdict", "verdict_reason", "scores", "good_points", "improvements", "advice"],
+  properties: {
+    verdict: { type: "string", enum: ["contract", "next_meeting", "pending", "lost"], description: "商談の結果。contract=契約獲得、next_meeting=次回アポ獲得（前向き）、pending=保留・様子見で終了、lost=失注・関係悪化" },
+    verdict_reason: { type: "string", description: "その判定にした理由を2〜3文で。経営者の心理描写を含める" },
+    scores: {
+      type: "object",
+      additionalProperties: false,
+      required: ["hearing", "proposal", "trust", "objection"],
+      properties: {
+        hearing: { type: "integer", description: "ヒアリング力 1〜10。相手の課題をどれだけ引き出せたか、質問の質" },
+        proposal: { type: "integer", description: "提案・クロージング 1〜10。課題と提案の紐付け、金額提示、契約への持っていき方" },
+        trust: { type: "integer", description: "信頼構築・話し方 1〜10。距離の詰め方、共感、言葉遣い" },
+        objection: { type: "integer", description: "反論処理 1〜10。「高い」「AIは不安」等の切り返しの上手さ" }
+      }
+    },
+    good_points: {
+      type: "array",
+      description: "よかった点。2〜4個。それぞれ実際の発言を引用して褒める",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["point", "quote"],
+        properties: {
+          point: { type: "string", description: "よかった点の説明" },
+          quote: { type: "string", description: "該当する実際の発言の引用。なければ空文字" }
+        }
+      }
+    },
+    improvements: {
+      type: "array",
+      description: "改善ポイント。2〜4個。実際の場面を引用し、「こう言えばよかった」という代替トークを必ず添える",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["point", "quote", "better"],
+        properties: {
+          point: { type: "string", description: "改善すべき点の説明" },
+          quote: { type: "string", description: "該当する実際の場面・発言の引用。なければ空文字" },
+          better: { type: "string", description: "代わりにこう言えばよかったという具体的なトーク例" }
+        }
+      }
+    },
+    advice: { type: "string", description: "次の商談に向けた総括アドバイス。3〜4文。この営業担当の伸びしろに焦点を当てて" }
+  }
+};
+
+async function endSession() {
+  if (state.messages.length < 3) {
+    toast("まだ会話がありません。少し話してから終了してください。");
+    return;
+  }
+  stopListening();
+  speechSynthesis.cancel();
+  $("loading").classList.add("open");
+  $("loading-txt").textContent = "商談を分析中…";
+
+  const transcript = state.messages
+    .filter((m, i) => i > 0) // 最初の演出用メッセージを除外
+    .map((m) => (m.role === "user" ? "営業担当" : "経営者") + "：" + m.content)
+    .join("\n");
+
+  try {
+    const data = await callClaude({
+      model: "claude-opus-4-8",
+      max_tokens: 8000,
+      thinking: { type: "adaptive" },
+      output_config: { format: { type: "json_schema", schema: FEEDBACK_SCHEMA } },
+      system: "あなたは中小企業向け営業のトップトレーナーです。営業ロールプレイの記録を分析し、厳しくも愛のあるフィードバックを日本語で返します。甘い点数はつけず、実際の発言を引用しながら具体的に指導してください。",
+      messages: [{
+        role: "user",
+        content: `以下は営業ロールプレイの記録です。営業担当は「おじさんの右腕」というAI活用伴走コンサルを売り込みに行きました。
+
+【商材情報】
+${store.product}
+
+【商談相手（AI演じる経営者）の設定】
+${state.persona.prompt}
+
+【商談記録】
+${transcript}
+
+この商談を分析し、指定のJSON形式でフィードバックを返してください。`,
+      }],
+    });
+    if (data.stop_reason === "refusal") throw new Error("分析が実行できませんでした。もう一度お試しください。");
+    let jsonText = "";
+    for (const block of data.content) if (block.type === "text") jsonText += block.text;
+    const fb = JSON.parse(jsonText);
+    renderResult(fb);
+    show("screen-result");
+  } catch (e) {
+    toast("分析エラー: " + e.message, 6000);
+  } finally {
+    $("loading").classList.remove("open");
+  }
+}
+
+/* ================= 結果画面 ================= */
+const VERDICT_MAP = {
+  contract: { label: "🎉 契約獲得！", cls: "win" },
+  next_meeting: { label: "🤝 次回アポ獲得", cls: "win" },
+  pending: { label: "😐 保留で終了", cls: "pending" },
+  lost: { label: "💦 失注…", cls: "lose" },
+};
+const SCORE_LABELS = {
+  hearing: "ヒアリング力",
+  proposal: "提案・クロージング",
+  trust: "信頼構築・話し方",
+  objection: "反論処理",
+};
+
+function renderResult(fb) {
+  const v = VERDICT_MAP[fb.verdict] || VERDICT_MAP.pending;
+  const vd = $("r-verdict");
+  vd.className = "verdict " + v.cls;
+  $("r-verdict-label").textContent = v.label;
+  $("r-verdict-reason").textContent = fb.verdict_reason;
+
+  const sg = $("r-scores");
+  sg.innerHTML = "";
+  for (const key of ["hearing", "proposal", "trust", "objection"]) {
+    const raw = fb.scores[key];
+    const score = Math.max(1, Math.min(10, Number(raw) || 1));
+    const card = document.createElement("div");
+    card.className = "score-card";
+    card.innerHTML = `<div class="title">${SCORE_LABELS[key]}</div><div class="val">${score}<span style="font-size:0.8rem;color:var(--sub)"> /10</span></div><div class="bar"><div style="width:${score * 10}%"></div></div>`;
+    sg.appendChild(card);
+  }
+
+  const good = $("r-good");
+  good.innerHTML = "";
+  for (const g of fb.good_points) {
+    const li = document.createElement("li");
+    li.textContent = g.point;
+    if (g.quote) {
+      const q = document.createElement("span");
+      q.className = "quote";
+      q.textContent = "「" + g.quote + "」";
+      li.appendChild(q);
+    }
+    good.appendChild(li);
+  }
+
+  const imp = $("r-improve");
+  imp.innerHTML = "";
+  for (const m of fb.improvements) {
+    const li = document.createElement("li");
+    li.textContent = m.point;
+    if (m.quote) {
+      const q = document.createElement("span");
+      q.className = "quote";
+      q.textContent = "場面：「" + m.quote + "」";
+      li.appendChild(q);
+    }
+    if (m.better) {
+      const b = document.createElement("span");
+      b.className = "quote";
+      b.style.borderLeftColor = "var(--green)";
+      b.textContent = "💡 " + m.better;
+      li.appendChild(b);
+    }
+    imp.appendChild(li);
+  }
+
+  $("r-advice").textContent = fb.advice;
+}
+
+/* ================= 設定モーダル ================= */
+function openSettings(hint) {
+  $("cfg-apikey").value = store.apiKey;
+  $("cfg-product").value = store.product;
+  $("cfg-rate").value = store.rate;
+  $("settings-modal").classList.add("open");
+  if (hint) toast(hint);
+}
+
+/* ================= イベント ================= */
+document.addEventListener("DOMContentLoaded", () => {
+  renderPersonaGrid();
+  state.recognition = setupRecognition();
+  state.jaVoice = pickJaVoice();
+
+  if (!state.recognition) {
+    toast("このブラウザは音声認識に対応していません。テキスト入力は使えます。Chrome / Edge を推奨します。", 8000);
+  }
+
+  $("start-btn").addEventListener("click", startSession);
+  $("end-btn").addEventListener("click", endSession);
+
+  $("mic-btn").addEventListener("click", () => {
+    if (state.listening) stopListening();
+    else startListening();
+  });
+
+  $("text-send").addEventListener("click", () => {
+    const v = $("text-input").value.trim();
+    if (v) { $("text-input").value = ""; sendUserMessage(v); }
+  });
+  $("text-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing) {
+      const v = $("text-input").value.trim();
+      if (v) { $("text-input").value = ""; sendUserMessage(v); }
+    }
+  });
+
+  $("retry-btn").addEventListener("click", () => startSession());
+  $("home-btn").addEventListener("click", () => {
+    speechSynthesis.cancel();
+    show("screen-setup");
+  });
+
+  $("settings-btn").addEventListener("click", () => openSettings());
+  $("cfg-cancel").addEventListener("click", () => $("settings-modal").classList.remove("open"));
+  $("cfg-save").addEventListener("click", () => {
+    store.apiKey = $("cfg-apikey").value.trim();
+    store.product = $("cfg-product").value.trim() || DEFAULT_PRODUCT;
+    const r = parseFloat($("cfg-rate").value);
+    if (!Number.isNaN(r)) store.rate = Math.max(0.8, Math.min(1.4, r));
+    $("settings-modal").classList.remove("open");
+    toast("保存しました", 2000);
+  });
+
+  // 初回起動でAPIキー未設定なら案内
+  if (!store.apiKey) {
+    setTimeout(() => openSettings("はじめに Anthropic APIキーを設定してください。"), 400);
+  }
+});
+</script>
+</body>
+</html>
