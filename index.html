@@ -261,6 +261,9 @@
     <label>商材メモ（AIが「おじさんの右腕」として理解する内容）</label>
     <textarea id="cfg-product"></textarea>
     <div class="note">料金やサービス内容を実際に合わせて書き換えると、経営者役の反応がリアルになります。</div>
+    <label>話し終わりと判断するまでの無音の長さ（秒）</label>
+    <input type="number" id="cfg-silence" min="1.5" max="8" step="0.5">
+    <div class="note">長くすると、ゆっくり考えながら話しても途中で送信されにくくなります（推奨 3〜4秒）。話し終えたらマイクをタップすればすぐ送信できます。</div>
     <label>音声の読み上げ速度（0.8〜1.4）</label>
     <input type="number" id="cfg-rate" min="0.8" max="1.4" step="0.1">
     <div class="btn-row">
@@ -421,6 +424,8 @@ const state = {
   listening: false,
   recognition: null,
   jaVoice: null,
+  pendingText: "",     // 発話中に貯めている確定テキスト
+  silenceTimer: null,  // 無音を検知して送信するタイマー
 };
 
 const store = {
@@ -435,6 +440,8 @@ const store = {
   set product(v) { localStorage.setItem("sd_product", v); },
   get rate() { return parseFloat(localStorage.getItem("sd_rate") || "1.05"); },
   set rate(v) { localStorage.setItem("sd_rate", String(v)); },
+  get silence() { return parseFloat(localStorage.getItem("sd_silence") || "3"); },
+  set silence(v) { localStorage.setItem("sd_silence", String(v)); },
 };
 
 /* ================= 画面切替 ================= */
@@ -491,7 +498,7 @@ function setupRecognition() {
   if (!SR) return null;
   const rec = new SR();
   rec.lang = "ja-JP";
-  rec.continuous = false;
+  rec.continuous = true;       // ポーズを入れても途中で切らない
   rec.interimResults = true;
   rec.onresult = (e) => {
     let interim = "", final = "";
@@ -499,10 +506,13 @@ function setupRecognition() {
       if (r.isFinal) final += r[0].transcript;
       else interim += r[0].transcript;
     }
-    $("interim").textContent = interim ? `…${interim}` : "";
-    if (final) {
-      $("interim").textContent = "";
-      sendUserMessage(final.trim());
+    state.pendingText = final.trim();
+    const shown = (state.pendingText + " " + interim).trim();
+    $("interim").textContent = shown ? `🎙 ${shown}` : "";
+    // 何か話すたびに無音タイマーをリセット。無音が続いたら送信する
+    clearTimeout(state.silenceTimer);
+    if (shown) {
+      state.silenceTimer = setTimeout(finalizeTurn, store.silence * 1000);
     }
   };
   rec.onend = () => {
@@ -517,9 +527,21 @@ function setupRecognition() {
   return rec;
 }
 
+// 発話を確定してAIに送る（無音タイマー or マイク再タップで呼ばれる）
+function finalizeTurn() {
+  clearTimeout(state.silenceTimer);
+  const text = (state.pendingText || "").trim();
+  state.pendingText = "";
+  $("interim").textContent = "";
+  if (text) sendUserMessage(text);
+  else stopListening();
+}
+
 function startListening() {
   if (!state.recognition || state.busy || state.listening) return;
   if (speechSynthesis.speaking) return;
+  state.pendingText = "";
+  clearTimeout(state.silenceTimer);
   try {
     state.recognition.start();
     state.listening = true;
@@ -527,6 +549,7 @@ function startListening() {
   } catch (_) { /* already started */ }
 }
 function stopListening() {
+  clearTimeout(state.silenceTimer);
   if (state.recognition && state.listening) state.recognition.stop();
 }
 function updateMicBtn() {
@@ -541,7 +564,7 @@ function updateMicBtn() {
     btn.disabled = true;
   } else if (state.listening) {
     btn.classList.add("listening");
-    btn.textContent = "🎙 聞き取り中…（タップで停止）";
+    btn.textContent = "🎙 聞き取り中…（話し終えたらタップで送信）";
     btn.disabled = false;
   } else {
     btn.textContent = "🎙 タップして話す";
@@ -885,6 +908,7 @@ function openSettings(hint) {
   }
   $("cfg-product").value = store.product;
   $("cfg-rate").value = store.rate;
+  $("cfg-silence").value = store.silence;
   $("settings-modal").classList.add("open");
   if (hint) toast(hint);
 }
@@ -904,7 +928,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("end-btn").addEventListener("click", endSession);
 
   $("mic-btn").addEventListener("click", () => {
-    if (state.listening) stopListening();
+    if (state.listening) finalizeTurn();  // 話し終わり→その場で送信
     else startListening();
   });
 
@@ -933,6 +957,8 @@ document.addEventListener("DOMContentLoaded", () => {
     store.product = $("cfg-product").value.trim() || DEFAULT_PRODUCT;
     const r = parseFloat($("cfg-rate").value);
     if (!Number.isNaN(r)) store.rate = Math.max(0.8, Math.min(1.4, r));
+    const s = parseFloat($("cfg-silence").value);
+    if (!Number.isNaN(s)) store.silence = Math.max(1.5, Math.min(8, s));
     $("settings-modal").classList.remove("open");
     updateKeyStatus();
     toast("保存しました", 2000);
