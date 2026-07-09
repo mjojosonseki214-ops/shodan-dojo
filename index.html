@@ -86,9 +86,21 @@
     background: var(--red); color: #fff; border: none; border-radius: 10px;
     padding: 10px 14px; cursor: pointer; font-size: 0.85rem; font-weight: bold; white-space: nowrap;
   }
+  .avatar-stage { display: flex; justify-content: center; margin-bottom: 12px; }
+  .avatar-wrap {
+    width: 150px; height: 150px; border-radius: 50%;
+    background: radial-gradient(circle at 50% 38%, #2a2f3e, #14161f);
+    border: 2px solid #333a4d; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    transition: box-shadow .2s, border-color .2s;
+  }
+  .avatar-wrap svg { width: 100%; height: 100%; display: block; }
+  .avatar-wrap.speaking { border-color: var(--accent); box-shadow: 0 0 20px rgba(232,163,61,.4); }
+  .avatar-wrap.mood-angry { border-color: var(--red); box-shadow: 0 0 20px rgba(240,96,96,.35); }
+  .avatar-wrap.mood-happy { border-color: var(--green); box-shadow: 0 0 16px rgba(62,207,142,.3); }
   #chat-log {
     background: var(--panel); border: 1px solid #333a4d; border-radius: var(--radius);
-    padding: 14px; height: 46vh; overflow-y: auto; margin-bottom: 12px;
+    padding: 14px; height: 38vh; overflow-y: auto; margin-bottom: 12px;
   }
   .msg { margin-bottom: 12px; display: flex; }
   .msg .bubble {
@@ -246,6 +258,7 @@
       </div>
       <button class="end-btn" id="end-btn">商談終了</button>
     </div>
+    <div class="avatar-stage"><div class="avatar-wrap" id="avatar-wrap"></div></div>
     <div id="chat-log"></div>
     <div id="interim"></div>
     <div class="voice-row">
@@ -272,6 +285,8 @@
         <div class="score-grid" id="r-scores"></div>
         <div class="fb-section"><h3 class="good">✅ よかった点</h3><ul id="r-good"></ul></div>
         <div class="fb-section"><h3 class="bad">🔧 改善ポイント</h3><ul id="r-improve"></ul></div>
+        <div class="fb-section"><h3 class="bad">🗣 余計な言い回し</h3><ul id="r-filler"></ul></div>
+        <div class="fb-section"><h3 class="bad">⚠ 失礼な言い回し</h3><ul id="r-rude"></ul></div>
         <div class="fb-section"><h3 class="advice">🎯 次の商談へのアドバイス</h3><p id="r-advice"></p></div>
         <div class="result-btns">
           <button class="primary-btn blue" id="retry-btn">同じ相手にもう一度</button>
@@ -581,6 +596,13 @@ function buildNoteMarkdown(fb) {
   const cleanLabel = v.label.replace(/^[^\p{L}\p{N}]+/u, "").trim(); // 先頭の絵文字を除去
   const s = fb.scores;
   const stars = "★".repeat(p.diff);
+  const g = (x) => (x ?? "-");
+  const filler = (fb.filler_words && fb.filler_words.length)
+    ? "\n## 🗣 余計な言い回し\n\n" + fb.filler_words.map((f) => `- 「${f.phrase}」`).join("\n") + "\n"
+    : "";
+  const rude = (fb.rude_points && fb.rude_points.length)
+    ? "\n## ⚠ 失礼な言い回し\n\n" + fb.rude_points.map((r) => `- 「${r.quote}」 → ${r.better}`).join("\n") + "\n"
+    : "";
   return `---
 date: ${stamp}
 相手: ${p.name}
@@ -601,11 +623,14 @@ tags: [商談道場, 営業ロープレ]
 
 | 項目 | 点数 |
 |---|---|
-| 困りごと発見力 | ${s.hearing}/10 |
-| 解決提案・クロージング | ${s.proposal}/10 |
-| 信頼構築・話し方 | ${s.trust}/10 |
-| 反論処理 | ${s.objection}/10 |
-
+| 困りごと発見力 | ${g(s.hearing)}/10 |
+| 課題の本質把握 | ${g(s.essence)}/10 |
+| 解決提案・クロージング | ${g(s.proposal)}/10 |
+| 信頼構築・話し方 | ${g(s.trust)}/10 |
+| 反論処理 | ${g(s.objection)}/10 |
+| 話し方の簡潔さ | ${g(s.conciseness)}/10 |
+| 言葉遣い・礼儀 | ${g(s.politeness)}/10 |
+${filler}${rude}
 ## 次の商談へのアドバイス
 
 ${fb.advice}
@@ -810,10 +835,162 @@ function speak(text, done) {
   const pv = state.persona?.voice || {};
   u.pitch = pv.pitch ?? 1.0;
   u.rate = (pv.rate ?? 1.0) * store.rate;
-  u.onend = () => { updateMicBtn(); if (done) done(); };
-  u.onerror = () => { updateMicBtn(); if (done) done(); };
+  u.onend = () => { stopTalking(); updateMicBtn(); if (done) done(); };
+  u.onerror = () => { stopTalking(); updateMicBtn(); if (done) done(); };
+  startTalking();
   speechSynthesis.speak(u);
   updateMicBtn();
+}
+
+/* ================= アバター（相手の顔） ================= */
+// 各経営者の顔の特徴（gender/年齢感に合わせた色や髪型）
+const FACES = {
+  tamura:    { skin:"#d8a878", hair:"#8a8a8a", style:"balding", facialHair:"stubble", glasses:false },
+  sato:      { skin:"#f0c9a8", hair:"#5a3b2a", style:"bob",      facialHair:"none",    glasses:false, lip:"#c85a5a" },
+  yamaguchi: { skin:"#cf9d6e", hair:"#9a9a9a", style:"buzz",     facialHair:"none",    glasses:false },
+  nakanishi: { skin:"#f0cdb0", hair:"#3a2f2a", style:"medium",   facialHair:"none",    glasses:true,  lip:"#b56a6a" },
+  okubo:     { skin:"#e0b085", hair:"#2a2420", style:"short",    facialHair:"none",    glasses:true },
+  inoue:     { skin:"#f0c6a0", hair:"#221a14", style:"medium",   facialHair:"stubble", glasses:false },
+  matsumoto: { skin:"#cf9a68", hair:"#8f8f8f", style:"short",    facialHair:"mustache",glasses:false },
+  fujii:     { skin:"#e2ab7c", hair:"#241d18", style:"short",    facialHair:"none",    glasses:true },
+};
+
+const MOUTH = {
+  closed: "M84 146 Q100 150 116 146",
+  open:   "M82 144 Q100 166 118 144 Q100 150 82 144 Z",
+  smile:  "M80 144 Q100 162 120 144",
+  frown:  "M84 153 Q100 143 116 153",
+};
+
+const avatar = { talkTimer: null, blinkTimer: null, mood: "neutral", toggle: false };
+
+function defaultFaceFor(p) {
+  const male = (p.voice && p.voice.gender) === "male";
+  return { skin:"#e8b98f", hair:"#4a4a4a", style: male ? "short" : "bob", facialHair:"none", glasses:false, lip: male ? null : "#c46" };
+}
+
+function faceSVG(f) {
+  const skin = f.skin, hair = f.hair;
+  let hairShape;
+  if (f.style === "balding") {
+    hairShape = `<path d="M46 80 Q60 58 100 58 Q140 58 154 80 Q148 72 100 72 Q52 72 46 80Z" fill="${hair}"/>
+      <path d="M40 116 Q35 74 52 70 L60 96Z" fill="${hair}"/><path d="M160 116 Q165 74 148 70 L140 96Z" fill="${hair}"/>`;
+  } else if (f.style === "buzz") {
+    hairShape = `<path d="M42 100 Q40 50 100 48 Q160 50 158 100 Q150 68 100 66 Q50 68 42 100Z" fill="${hair}" opacity="0.9"/>`;
+  } else if (f.style === "bob") {
+    hairShape = `<path d="M36 122 Q30 42 100 40 Q170 42 164 122 Q168 92 150 80 Q150 58 100 56 Q50 58 50 80 Q32 92 36 122Z" fill="${hair}"/>`;
+  } else if (f.style === "medium") {
+    hairShape = `<path d="M40 110 Q34 48 100 46 Q166 48 160 110 Q160 76 138 68 Q140 60 100 58 Q60 60 62 68 Q40 76 40 110Z" fill="${hair}"/>`;
+  } else { // short
+    hairShape = `<path d="M42 98 Q40 48 100 46 Q160 48 158 98 Q156 68 132 64 Q134 56 100 54 Q66 56 68 64 Q44 68 42 98Z" fill="${hair}"/>`;
+  }
+  const glasses = f.glasses ? `<g stroke="#2a2f3a" stroke-width="3" fill="rgba(180,200,230,0.12)">
+      <rect x="56" y="95" width="32" height="24" rx="9"/><rect x="112" y="95" width="32" height="24" rx="9"/>
+      <line x1="88" y1="105" x2="112" y2="105"/></g>` : "";
+  let facial = "";
+  if (f.facialHair === "mustache") facial = `<path d="M80 141 Q100 151 120 141 Q100 147 80 141Z" fill="${hair}"/>`;
+  else if (f.facialHair === "beard") facial = `<path d="M60 120 Q64 174 100 178 Q136 174 140 120 Q120 152 100 152 Q80 152 60 120Z" fill="${hair}" opacity="0.85"/>`;
+  else if (f.facialHair === "stubble") facial = `<path d="M62 128 Q68 170 100 174 Q132 170 138 128 Q120 154 100 154 Q80 154 62 128Z" fill="${hair}" opacity="0.16"/>`;
+  const mouthStroke = f.lip || "#7a3b30";
+
+  return `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <ellipse cx="40" cy="112" rx="10" ry="14" fill="${skin}"/>
+    <ellipse cx="160" cy="112" rx="10" ry="14" fill="${skin}"/>
+    <ellipse cx="100" cy="106" rx="60" ry="68" fill="${skin}"/>
+    ${facial}
+    ${hairShape}
+    <path id="brow-l" d="M62 88 Q74 82 86 88" stroke="${hair}" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <path id="brow-r" d="M114 88 Q126 82 138 88" stroke="${hair}" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <ellipse cx="74" cy="104" rx="12" ry="9" fill="#fff"/>
+    <ellipse cx="126" cy="104" rx="12" ry="9" fill="#fff"/>
+    <circle cx="74" cy="105" r="5" fill="#2a2320"/>
+    <circle cx="126" cy="105" r="5" fill="#2a2320"/>
+    <rect id="lid-l" x="61" y="95" width="26" height="0" rx="4" fill="${skin}"/>
+    <rect id="lid-r" x="113" y="95" width="26" height="0" rx="4" fill="${skin}"/>
+    ${glasses}
+    <path d="M100 110 L95 128 Q100 132 105 128" stroke="rgba(0,0,0,0.22)" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    <path id="mouth" d="${MOUTH.closed}" stroke="${mouthStroke}" stroke-width="4" fill="none" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function mountAvatar(persona) {
+  const wrap = $("avatar-wrap");
+  if (!wrap) return;
+  const f = persona.face || FACES[persona.id] || defaultFaceFor(persona);
+  wrap.innerHTML = faceSVG(f);
+  wrap.classList.remove("mood-angry", "mood-happy", "speaking");
+  avatar.mood = "neutral";
+  applyMood("neutral");
+  startBlink();
+}
+
+function setMouth(name) {
+  const m = document.getElementById("mouth");
+  if (!m) return;
+  m.setAttribute("d", MOUTH[name]);
+  m.setAttribute("fill", name === "open" ? "#7a3b3b" : "none");
+}
+
+function applyMood(mood) {
+  avatar.mood = mood;
+  const wrap = $("avatar-wrap");
+  const bl = document.getElementById("brow-l"), br = document.getElementById("brow-r");
+  if (wrap) wrap.classList.remove("mood-angry", "mood-happy");
+  if (mood === "angry") {
+    if (wrap) wrap.classList.add("mood-angry");
+    if (bl) bl.setAttribute("d", "M62 82 Q74 90 86 94");
+    if (br) br.setAttribute("d", "M114 94 Q126 90 138 82");
+    setMouth("frown");
+  } else if (mood === "happy") {
+    if (wrap) wrap.classList.add("mood-happy");
+    if (bl) bl.setAttribute("d", "M62 86 Q74 80 86 84");
+    if (br) br.setAttribute("d", "M114 84 Q126 80 138 86");
+    setMouth("smile");
+  } else {
+    if (bl) bl.setAttribute("d", "M62 88 Q74 82 86 88");
+    if (br) br.setAttribute("d", "M114 88 Q126 82 138 88");
+    setMouth("closed");
+  }
+}
+
+function startTalking() {
+  stopTalking();
+  const wrap = $("avatar-wrap");
+  if (wrap) wrap.classList.add("speaking");
+  avatar.talkTimer = setInterval(() => {
+    avatar.toggle = !avatar.toggle;
+    setMouth(avatar.toggle ? "open" : (avatar.mood === "happy" ? "smile" : "closed"));
+  }, 150);
+}
+function stopTalking() {
+  if (avatar.talkTimer) { clearInterval(avatar.talkTimer); avatar.talkTimer = null; }
+  const wrap = $("avatar-wrap");
+  if (wrap) wrap.classList.remove("speaking");
+  applyMood(avatar.mood); // 口を表情の基本形に戻す
+}
+
+function doBlink() {
+  const ll = document.getElementById("lid-l"), lr = document.getElementById("lid-r");
+  if (!ll || !lr) return;
+  ll.setAttribute("height", "18"); lr.setAttribute("height", "18");
+  setTimeout(() => { if (ll) ll.setAttribute("height", "0"); if (lr) lr.setAttribute("height", "0"); }, 120);
+}
+function startBlink() {
+  stopBlink();
+  const loop = () => { doBlink(); avatar.blinkTimer = setTimeout(loop, 2500 + Math.random() * 3000); };
+  avatar.blinkTimer = setTimeout(loop, 2000);
+}
+function stopBlink() {
+  if (avatar.blinkTimer) { clearTimeout(avatar.blinkTimer); avatar.blinkTimer = null; }
+}
+
+// 相手の返答から感情を推定（怒り／前向き／通常）
+function detectMood(text) {
+  const angry = /(帰っ?てくれ|帰れ|失礼|なんや|何やその|ふざけ|話にならん|もうええ|バカ|ばか|いい加減|不愉快|無礼|ええ加減|二度と|！！)/;
+  const happy = /(ほんまに|なるほど|それ、?ええ|ええやん|いいね|詳しく聞|聞かせて|助かる|お願いし|前向き|興味|おもろ|面白|やってみ|頼む)/;
+  if (angry.test(text)) return "angry";
+  if (happy.test(text)) return "happy";
+  return "neutral";
 }
 
 /* ================= チャットUI ================= */
@@ -869,7 +1046,8 @@ ${store.product}
 - 相手の説明が抽象的・一方的・専門用語だらけなら、興味を失った態度を見せる。
 - 反論パターンを商談の流れに応じて自然にぶつける。
 - 相手があなたの困りごとを正しく捉え、それに対する解決の道筋を示し、費用への不安にも誠実に答え、信頼に足ると感じたときだけ、契約や「次回、詳しい話を聞かせて」に前向きになってよい。基準は難易度に応じて厳しく保つこと。
-- 相手が失礼な態度を取ったり、強引すぎる場合は、商談を打ち切ってよい（「今日はもうええわ」など）。
+- 相手が失礼な言い方（見下す・馴れ馴れしすぎる・タメ口・経営者や会社をバカにする・押し付けがましい・「儲かりますよ」等の安っぽい断定）をしたら、経営者として本気で不快感を示し、はっきり怒ること（「なんやその言い方は」「随分失礼なやつやな」「客に向かってその態度か」など、その人物の口調で）。軽く受け流さない。
+- あまりに失礼・無礼が続く場合は、怒って商談を打ち切ってよい（「今日はもうええわ、帰ってくれ」など）。
 - 現実の中小企業経営者らしい生活感のある発言をする（業界の実情、金額感、人間関係など）。
 
 最初のあなたの発言から商談が始まります。あなたのオフィス（または店・事務所）に営業担当が訪ねてきた場面です。挨拶されたら軽く応じつつ、「で、今日はどんな用件？」という雰囲気で始めてください。`;
@@ -893,6 +1071,7 @@ async function personaReply() {
     thinkingBubble.textContent = text;
     $("chat-log").scrollTop = $("chat-log").scrollHeight;
     state.busy = false;
+    applyMood(detectMood(text)); // 返答の感情を顔に反映
     speak(text, () => {
       if ($("auto-mic").checked) startListening();
     });
@@ -928,6 +1107,7 @@ function startSession() {
   $("s-emoji").textContent = p.emoji;
   $("s-name").textContent = p.name;
   $("s-biz").textContent = p.biz + "　難易度" + "★".repeat(p.diff);
+  mountAvatar(p);
   addBubble("system", "商談スタート。まずは挨拶から。マイクをタップして話しかけよう。");
   show("screen-session");
   // 経営者側の第一声を生成
@@ -938,19 +1118,22 @@ function startSession() {
 const FEEDBACK_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["verdict", "verdict_reason", "scores", "good_points", "improvements", "advice"],
+  required: ["verdict", "verdict_reason", "scores", "good_points", "improvements", "advice", "filler_words", "rude_points"],
   properties: {
     verdict: { type: "string", enum: ["contract", "next_meeting", "pending", "lost"], description: "商談の結果。contract=契約獲得、next_meeting=次回アポ獲得（前向き）、pending=保留・様子見で終了、lost=失注・関係悪化" },
     verdict_reason: { type: "string", description: "その判定にした理由を2〜3文で。経営者の心理描写を含める" },
     scores: {
       type: "object",
       additionalProperties: false,
-      required: ["hearing", "proposal", "trust", "objection"],
+      required: ["hearing", "essence", "proposal", "trust", "objection", "conciseness", "politeness"],
       properties: {
         hearing: { type: "integer", description: "困りごと発見力 1〜10。質問を重ねて相手の会社の具体的な困りごとをどれだけ発見・深掘り・特定できたか。これがこの営業の最重要スキル" },
+        essence: { type: "integer", description: "課題の本質把握 1〜10。相手が口にした表面的な困りごとの奥にある本質的な課題（本当のボトルネック、経営者が本当に困っていること）をどれだけ捉えられたか。表面をなぞっただけなら低評価" },
         proposal: { type: "integer", description: "解決提案・クロージング 1〜10。発見した困りごとに対して「AIでこう解決する」という具体的な仕組みの絵を見せられたか。一般的なAIの説明に終始していないか。契約への持っていき方" },
         trust: { type: "integer", description: "信頼構築・話し方 1〜10。距離の詰め方、共感、言葉遣い" },
-        objection: { type: "integer", description: "反論処理 1〜10。「高い」「AIは不安」等の切り返しの上手さ" }
+        objection: { type: "integer", description: "反論処理 1〜10。「高い」「AIは不安」等の切り返しの上手さ" },
+        conciseness: { type: "integer", description: "話し方の簡潔さ 1〜10。「そうですね」「えっとですね」「まあ」「一応」などの余計な前置き・つなぎ言葉・冗長な言い回しがどれだけ少なく、要点を端的に話せていたか。余計な言葉が多いほど低評価" },
+        politeness: { type: "integer", description: "言葉遣い・礼儀 1〜10。経営者に対して失礼・無礼・上から目線・馴れ馴れしすぎる言い回しがなかったか。失礼な発言が多いほど大きく減点" }
       }
     },
     good_points: {
@@ -980,7 +1163,34 @@ const FEEDBACK_SCHEMA = {
         }
       }
     },
-    advice: { type: "string", description: "次の商談に向けた総括アドバイス。3〜4文。この営業担当の伸びしろに焦点を当てて" }
+    advice: { type: "string", description: "次の商談に向けた総括アドバイス。3〜4文。この営業担当の伸びしろに焦点を当てて" },
+    filler_words: {
+      type: "array",
+      description: "商談中に営業担当が使った余計な言い回し・口癖（「そうですね」「えっとですね」「まあ」「一応」「なんか」などの意味のない前置き・つなぎ言葉・冗長な言い回し）。使われていなければ空配列",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["phrase", "comment"],
+        properties: {
+          phrase: { type: "string", description: "検出した余計な言い回し・口癖" },
+          comment: { type: "string", description: "なぜ不要か、どう直すべきかを一言" }
+        }
+      }
+    },
+    rude_points: {
+      type: "array",
+      description: "経営者に対して失礼・無礼・上から目線・馴れ馴れしすぎる・見下したと受け取られる言い回しがあれば挙げる。なければ空配列",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["quote", "why", "better"],
+        properties: {
+          quote: { type: "string", description: "失礼だった実際の発言" },
+          why: { type: "string", description: "なぜ経営者に失礼・不快に受け取られるか" },
+          better: { type: "string", description: "どう言い換えるべきか、具体的なセリフ例" }
+        }
+      }
+    }
   }
 };
 
@@ -991,6 +1201,8 @@ async function endSession() {
   }
   stopListening();
   speechSynthesis.cancel();
+  stopTalking();
+  stopBlink();
   $("loading").classList.add("open");
   $("loading-txt").textContent = "商談を分析中…";
 
@@ -1010,6 +1222,11 @@ async function endSession() {
 この商材「おじさんの右腕」の営業の核心は次の2点です。評価もこの2点を最重視してください。
 1. 困りごとの発見：AIの説明をする前に、質問によって相手の会社の具体的な困りごとを見つけ出せたか
 2. 解決の具体化：見つけた困りごとに対して「AIでこういう仕組みを作って解決する」という絵を相手に見せられたか
+
+さらに次の3点も必ず評価してください。
+3. 課題の本質把握：相手が口にした表面的な困りごとの奥にある「本質的な課題」を捉えられたか。表面をなぞっただけなら低評価にする。
+4. 余計な言い回し：「そうですね」「えっとですね」「まあ」「一応」「なんか」などの意味のないつなぎ言葉・冗長な前置きを、filler_words に実際の言葉で具体的に挙げる（あれば）。なければ空配列。
+5. 失礼な言い回し：経営者に対して失礼・上から目線・馴れ馴れしすぎる・見下した発言があれば rude_points に挙げ、なぜ失礼かと言い換え例を示す。失礼があれば politeness を大きく下げる。なければ空配列。
 
 一般的なAIの機能説明・ツール紹介に終始した営業は、たとえ話し方が上手でも低評価とします。`,
       messages: [{
@@ -1057,10 +1274,14 @@ const VERDICT_MAP = {
 };
 const SCORE_LABELS = {
   hearing: "困りごと発見力",
+  essence: "課題の本質把握",
   proposal: "解決提案・クロージング",
   trust: "信頼構築・話し方",
   objection: "反論処理",
+  conciseness: "話し方の簡潔さ",
+  politeness: "言葉遣い・礼儀",
 };
+const SCORE_ORDER = ["hearing", "essence", "proposal", "trust", "objection", "conciseness", "politeness"];
 
 function renderResult(fb) {
   const v = VERDICT_MAP[fb.verdict] || VERDICT_MAP.pending;
@@ -1071,7 +1292,7 @@ function renderResult(fb) {
 
   const sg = $("r-scores");
   sg.innerHTML = "";
-  for (const key of ["hearing", "proposal", "trust", "objection"]) {
+  for (const key of SCORE_ORDER) {
     const raw = fb.scores[key];
     const score = Math.max(1, Math.min(10, Number(raw) || 1));
     const card = document.createElement("div");
@@ -1113,6 +1334,57 @@ function renderResult(fb) {
       li.appendChild(b);
     }
     imp.appendChild(li);
+  }
+
+  // 余計な言い回し
+  const filler = $("r-filler");
+  filler.innerHTML = "";
+  if (!fb.filler_words || fb.filler_words.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = "特になし。無駄のない話し方でした。";
+    li.style.color = "var(--green)";
+    filler.appendChild(li);
+  } else {
+    for (const f of fb.filler_words) {
+      const li = document.createElement("li");
+      li.textContent = `「${f.phrase}」`;
+      if (f.comment) {
+        const c = document.createElement("span");
+        c.className = "quote";
+        c.textContent = f.comment;
+        li.appendChild(c);
+      }
+      filler.appendChild(li);
+    }
+  }
+
+  // 失礼な言い回し
+  const rude = $("r-rude");
+  rude.innerHTML = "";
+  if (!fb.rude_points || fb.rude_points.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = "失礼な言い回しはありませんでした。";
+    li.style.color = "var(--green)";
+    rude.appendChild(li);
+  } else {
+    for (const r of fb.rude_points) {
+      const li = document.createElement("li");
+      li.textContent = r.why;
+      if (r.quote) {
+        const q = document.createElement("span");
+        q.className = "quote";
+        q.textContent = "場面：「" + r.quote + "」";
+        li.appendChild(q);
+      }
+      if (r.better) {
+        const b = document.createElement("span");
+        b.className = "quote";
+        b.style.borderLeftColor = "var(--green)";
+        b.textContent = "💡 " + r.better;
+        li.appendChild(b);
+      }
+      rude.appendChild(li);
+    }
   }
 
   $("r-advice").textContent = fb.advice;
@@ -1240,6 +1512,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("retry-btn").addEventListener("click", () => startSession());
   $("home-btn").addEventListener("click", () => {
     speechSynthesis.cancel();
+    stopTalking();
+    stopBlink();
     show("screen-setup");
   });
 
